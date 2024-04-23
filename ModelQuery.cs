@@ -101,7 +101,7 @@ namespace Modules.Modeling
                         _logger.LogInformation("Item is {0}", MediaItem);
                         _logger.LogInformation("Item document type {0}", itemModel);
 
-                        //QueryResult.MediaResults.Add(MediaItem);
+                        QueryResult.MediaResults.Add(MediaItem);
 
                     }
 
@@ -222,7 +222,7 @@ namespace Modules.Modeling
 
     public class QueryResult
     {
-        //public List<dynamic> MediaResults = new List<dynamic>();
+        public List<dynamic> MediaResults = new List<dynamic>();
         public QueryDiagnostics QueryDiagnostics = new QueryDiagnostics();
     }
 
