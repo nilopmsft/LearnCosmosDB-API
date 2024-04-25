@@ -14,22 +14,15 @@ namespace Modules.Modeling
     public class RequestValues
     {
         public string SearchValue { get; set; }
+        public string? SearchType { get; set; }
         public int? Id { get; set; }
-        public string? type { get; set; }
     }
 
-    public class QueryCosmos
+    public class QueryCosmos(ILogger<QueryCosmos> logger, CosmosClient cosmosClient)
     {
-        private readonly ILogger<QueryCosmos> _logger;
-        private readonly CosmosClient _cosmosClient;
+        private readonly ILogger<QueryCosmos> _logger = logger;
+        private readonly CosmosClient _cosmosClient = cosmosClient;
         public string? SearchType { get; set; }
-
-        public QueryCosmos(ILogger<QueryCosmos> logger, CosmosClient cosmosClient)
-        {
-            _logger = logger;
-            _cosmosClient = cosmosClient;
-        }
-
 
         [Function("QueryCosmos")]
         public async Task<IActionResult> RunAsync([HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = "module/modeling/{container}")] HttpRequest req, string container)
@@ -41,33 +34,44 @@ namespace Modules.Modeling
 
             Container cosmosContainer  = _cosmosClient.GetContainer(Environment.GetEnvironmentVariable("CosmosDbDatabaseName"), container);
 
-            // if (requestValues.Id != null && requestValues.Title != null)
-            // {
+            QueryResult QueryResult = new QueryResult();
 
-            //     return new BadRequestObjectResult("We would do a point read on id: " + requestValues.Id + " and a partition key " + requestValues.Title + "for model " + requestValues.ModelContainer);
-
-            // }
-            // else
-            // {
-                // if (requestValues.SearchType == null)
-                // {
-                //     string sqlQueryText = $"SELECT * FROM c WHERE c.title = '{requestValues.Title}'";
-                // }
-                // else
-                // {
-                //     string sqlQueryText = $"SELECT * FROM c WHERE c.title = '{requestValues.Title}'";
-                // }
-                string SearchValue = RequestValues.SearchValue.ToLower();
-                string sqlQueryText = $"SELECT * FROM c WHERE c.title = '{SearchValue}'";
-                // _logger.LogInformation("Executing query: {0}\n", sqlQueryText);
-
-                FeedIterator<Object> queryResultSetIterator = cosmosContainer.GetItemQueryIterator<Object>(sqlQueryText);
-                QueryResult QueryResult = new QueryResult();
-
+            RequestDiagnostics RequestDiagnostics = new RequestDiagnostics
+            {
                 // Adding request into to the diagnostic result
-                QueryResult.QueryDiagnostics.QueryText = sqlQueryText;
-                QueryResult.QueryDiagnostics.SearchValue = SearchValue;
+                SubmittedSearchValue = RequestValues.SearchValue,
+                FormattedSearchValue = RequestValues.SearchValue.ToLower(), // Lowercase the search value for the query to match data title format
+                Container = container
+            };
+
+            // If we have both Id and a SearchValue then we can attempt a Point Read.
+            if (RequestValues.Id != null && RequestValues.SearchValue != null)
+            {
+                RequestDiagnostics.QueryType = "Point Read";
+
+                //ItemResponse<Object> response = await cosmosContainer.ReadItemAsync<Object>(RequestValues.Id.ToString(), new PartitionKey(RequestValues.SearchValue));
+
+            }
+            else
+            {
+                RequestDiagnostics.QueryType = "SQL Query";
+                // Check if this is a person query in single model as it has a unique query, otherwise standard title query
+                if (RequestValues.SearchType == "person")
+                {
+                    RequestDiagnostics.QueryText = $"SELECT c.id, c.title, c.original_title, c.year, c.genres, c.actors, c.directors, c.type FROM c JOIN a IN c.actors JOIN d IN c.directors where a.name ='{RequestDiagnostics.FormattedSearchValue}' or d.name = '{RequestDiagnostics.FormattedSearchValue}'";
+                }
+                else
+                {
+                    RequestDiagnostics.QueryText = $"SELECT * FROM c WHERE c.title = '{RequestDiagnostics.FormattedSearchValue}'";
+                }
+
+                FeedIterator<Object> queryResultSetIterator = cosmosContainer.GetItemQueryIterator<Object>(RequestDiagnostics.QueryText);
                 
+                // Return a 404 if no results are found
+                if (queryResultSetIterator.HasMoreResults == false)
+                {
+                    return new NotFoundResult();
+                }
 
                 while (queryResultSetIterator.HasMoreResults)
                 {
@@ -98,20 +102,29 @@ namespace Modules.Modeling
                                 break;
                         }
 
-                        _logger.LogInformation("Item is {0}", MediaItem);
-                        _logger.LogInformation("Item document type {0}", itemModel);
+                        // _logger.LogInformation("Item is {0}", MediaItem);
+                        // _logger.LogInformation("Item document type {0}", itemModel);
 
                         QueryResult.MediaResults.Add(MediaItem);
 
                     }
 
-                    QueryResult.QueryDiagnostics.RequestCharge = currentResultSet.RequestCharge.ToString();
-                    QueryResult.QueryDiagnostics.ActivityId = currentResultSet.ActivityId;
+                    // Set some of the diagnostic values for the query
+                    RequestDiagnostics.RequestCharge = currentResultSet.RequestCharge.ToString();
+                    RequestDiagnostics.ActivityId = currentResultSet.ActivityId;
                 }
-                _logger.LogInformation("Query Result: {0}", QueryResult);
+
+                // TODO addd some kind of check for no results found
+                // if (QueryResult.MediaResults.Count == 0)
+                // {
+                //     return new NotFoundResult();
+                // }
+                // _logger.LogInformation("Query Result: {0}", JsonConvert.SerializeObject(QueryResult));
                 
-                return new OkObjectResult(QueryResult);
+                //Some reason I had to use JsonConvert.SerializeObject to get the result to return as a string, was OkObjectResult being Lazy?
             }
+            QueryResult.RequestDiagnostics = RequestDiagnostics;
+            return new OkObjectResult(JsonConvert.SerializeObject(QueryResult));
         }
     }
 
@@ -223,14 +236,17 @@ namespace Modules.Modeling
     public class QueryResult
     {
         public List<dynamic> MediaResults = new List<dynamic>();
-        public QueryDiagnostics QueryDiagnostics = new QueryDiagnostics();
+        public RequestDiagnostics RequestDiagnostics = new RequestDiagnostics();
     }
 
-    public class QueryDiagnostics
+    public class RequestDiagnostics
     {
         public string QueryText { get; set; }
-        public string SearchValue { get; set; }
+        public string SubmittedSearchValue { get; set; }
+        public string FormattedSearchValue { get; set; }
         public string RequestCharge { get; set; }
         public string ActivityId { get; set; }
+        public string QueryType { get; set; }
+        public string Container { get; set; }
     }
-
+}
