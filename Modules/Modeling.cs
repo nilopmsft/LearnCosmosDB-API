@@ -15,7 +15,7 @@ namespace Modules.Modeling
     {
         public string SearchValue { get; set; }
         public string? SearchType { get; set; }
-        public int? Id { get; set; }
+        public string? DocId { get; set; }
     }
 
     public class QueryCosmos(ILogger<QueryCosmos> logger, CosmosClient cosmosClient)
@@ -45,11 +45,26 @@ namespace Modules.Modeling
             };
 
             // If we have both Id and a SearchValue then we can attempt a Point Read.
-            if (RequestValues.Id != null && RequestValues.SearchValue != null)
+            if (RequestValues.DocId != null && RequestValues.SearchValue != null)
             {
                 RequestDiagnostics.QueryType = "Point Read";
+                RequestDiagnostics.DocId = RequestValues.DocId;
 
-                //ItemResponse<Object> response = await cosmosContainer.ReadItemAsync<Object>(RequestValues.Id.ToString(), new PartitionKey(RequestValues.SearchValue));
+                ItemResponse<Object> response = await cosmosContainer.ReadItemAsync<Object>(RequestValues.DocId.ToString(), new PartitionKey(RequestDiagnostics.FormattedSearchValue));
+                if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    return new NotFoundResult();
+                }
+                else
+                {
+
+                    object Item = ResultModeling.GetItemModel(container, response.Resource);
+                    QueryResult.MediaResults.Add(Item);
+
+                    // Set some of the diagnostic values for the query
+                    RequestDiagnostics.RequestCharge = response.RequestCharge.ToString();
+                    RequestDiagnostics.ActivityId = response.ActivityId;
+                }
 
             }
             else
@@ -65,6 +80,8 @@ namespace Modules.Modeling
                     RequestDiagnostics.QueryText = $"SELECT * FROM c WHERE c.title = '{RequestDiagnostics.FormattedSearchValue}'";
                 }
 
+                _logger.LogInformation("Query Text: {0}", RequestDiagnostics.QueryText);
+
                 FeedIterator<Object> queryResultSetIterator = cosmosContainer.GetItemQueryIterator<Object>(RequestDiagnostics.QueryText);
                 
                 // Return a 404 if no results are found
@@ -79,33 +96,29 @@ namespace Modules.Modeling
                     FeedResponse<Object> currentResultSet = await queryResultSetIterator.ReadNextAsync();
                     foreach (Object item in currentResultSet)
                     {
-                        JObject jObject = JObject.FromObject(item);
-                        string itemtype = jObject["type"].ToString();
-                        string itemModel = "Media" + container + char.ToUpper(itemtype[0]) + itemtype.Substring(1);
-                        _logger.LogInformation("Type: {0}", itemtype);
-                        _logger.LogInformation("Model: {0}", itemModel);
+                        // JObject jObject = JObject.FromObject(item);
+                        // string itemtype = jObject["type"].ToString();
+                        // string itemModel = "Media" + container + char.ToUpper(itemtype[0]) + itemtype.Substring(1);
 
-                        object MediaItem;
-                        switch (itemModel)
-                        {
-                            case "MediaEmbeddedPerson":
-                                MediaItem = JsonConvert.DeserializeObject<MediaEmbeddedPerson>(jObject.ToString());
-                                break;
-                            case "MediaReferencePerson":
-                                MediaItem = JsonConvert.DeserializeObject<MediaReferencePerson>(jObject.ToString());
-                                break;
-                            case "MediaHybridPerson":
-                                MediaItem = JsonConvert.DeserializeObject<MediaHybridPerson>(jObject.ToString());
-                                break;
-                            default: // Default to single model for media as it can be used for all types in that container
-                                MediaItem = JsonConvert.DeserializeObject<MediaSingle>(jObject.ToString());
-                                break;
-                        }
+                        // object MediaItem;
+                        // switch (itemModel)
+                        // {
+                        //     case "MediaEmbeddedPerson":
+                        //         MediaItem = JsonConvert.DeserializeObject<MediaEmbeddedPerson>(jObject.ToString());
+                        //         break;
+                        //     case "MediaReferencePerson":
+                        //         MediaItem = JsonConvert.DeserializeObject<MediaReferencePerson>(jObject.ToString());
+                        //         break;
+                        //     case "MediaHybridPerson":
+                        //         MediaItem = JsonConvert.DeserializeObject<MediaHybridPerson>(jObject.ToString());
+                        //         break;
+                        //     default: // Default to single model for media as it can be used for all types in that container
+                        //         MediaItem = JsonConvert.DeserializeObject<MediaSingle>(jObject.ToString());
+                        //         break;
+                        // }
 
-                        // _logger.LogInformation("Item is {0}", MediaItem);
-                        // _logger.LogInformation("Item document type {0}", itemModel);
-
-                        QueryResult.MediaResults.Add(MediaItem);
+                        object Item = ResultModeling.GetItemModel(container, item);
+                        QueryResult.MediaResults.Add(Item);
 
                     }
 
@@ -121,9 +134,11 @@ namespace Modules.Modeling
                 // }
                 // _logger.LogInformation("Query Result: {0}", JsonConvert.SerializeObject(QueryResult));
                 
-                //Some reason I had to use JsonConvert.SerializeObject to get the result to return as a string, was OkObjectResult being Lazy?
             }
+
             QueryResult.RequestDiagnostics = RequestDiagnostics;
+
+            //Some reason I had to use JsonConvert.SerializeObject to get the result to return as a string, was OkObjectResult being Lazy?
             return new OkObjectResult(JsonConvert.SerializeObject(QueryResult));
         }
     }
@@ -244,9 +259,39 @@ namespace Modules.Modeling
         public string QueryText { get; set; }
         public string SubmittedSearchValue { get; set; }
         public string FormattedSearchValue { get; set; }
+        public string DocId { get; set; }
         public string RequestCharge { get; set; }
         public string ActivityId { get; set; }
         public string QueryType { get; set; }
         public string Container { get; set; }
+    }
+
+    public class ResultModeling
+    {
+        public static object GetItemModel(string container, object item)
+        {
+
+            JObject jObject = JObject.FromObject(item);
+            string itemtype = jObject["type"].ToString();
+            string itemModel = "Media" + container + char.ToUpper(itemtype[0]) + itemtype.Substring(1);
+
+            object Item;
+            switch (itemModel)
+            {
+                case "MediaEmbeddedPerson":
+                    Item = JsonConvert.DeserializeObject<MediaEmbeddedPerson>(jObject.ToString());
+                    break;
+                case "MediaReferencePerson":
+                    Item = JsonConvert.DeserializeObject<MediaReferencePerson>(jObject.ToString());
+                    break;
+                case "MediaHybridPerson":
+                    Item = JsonConvert.DeserializeObject<MediaHybridPerson>(jObject.ToString());
+                    break;
+                default: // Default to single model for media as it can be used for all types in that container
+                    Item = JsonConvert.DeserializeObject<MediaSingle>(jObject.ToString());
+                    break;
+            }
+            return Item;
+        }
     }
 }
