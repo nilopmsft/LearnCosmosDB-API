@@ -27,8 +27,6 @@ namespace Modules.Modeling
         [Function("QueryCosmos")]
         public async Task<IActionResult> RunAsync([HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = "module/modeling/{container}")] HttpRequest req, string container)
         {
-            _logger.LogInformation("C# HTTP trigger function processed a request.");
-
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             RequestValues RequestValues = System.Text.Json.JsonSerializer.Deserialize<RequestValues>(requestBody);
 
@@ -49,15 +47,8 @@ namespace Modules.Modeling
             {
                 RequestDiagnostics.QueryType = "Point Read";
                 RequestDiagnostics.DocId = RequestValues.DocId;
-
-                ItemResponse<Object> response = await cosmosContainer.ReadItemAsync<Object>(RequestValues.DocId.ToString(), new PartitionKey(RequestDiagnostics.FormattedSearchValue));
-                if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-                {
-                    return new NotFoundResult();
-                }
-                else
-                {
-
+                try{
+                    ItemResponse<Object> response = await cosmosContainer.ReadItemAsync<Object>(RequestValues.DocId.ToString(), new PartitionKey(RequestDiagnostics.FormattedSearchValue));
                     object Item = ResultModeling.GetItemModel(container, response.Resource);
                     QueryResult.MediaResults.Add(Item);
 
@@ -65,7 +56,10 @@ namespace Modules.Modeling
                     RequestDiagnostics.RequestCharge = response.RequestCharge.ToString();
                     RequestDiagnostics.ActivityId = response.ActivityId;
                 }
-
+                catch(CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    return new NotFoundResult();
+                }
             }
             else
             {
@@ -84,39 +78,22 @@ namespace Modules.Modeling
 
                 FeedIterator<Object> queryResultSetIterator = cosmosContainer.GetItemQueryIterator<Object>(RequestDiagnostics.QueryText);
                 
-                // Return a 404 if no results are found
-                if (queryResultSetIterator.HasMoreResults == false)
-                {
-                    return new NotFoundResult();
-                }
+
 
                 while (queryResultSetIterator.HasMoreResults)
                 {
                     //Check for the document type and deserialize it into the appropriate class
                     FeedResponse<Object> currentResultSet = await queryResultSetIterator.ReadNextAsync();
+
+                    // Return a 404 if no results are found
+                    if (currentResultSet.Count == 0)
+                    {
+                        _logger.LogInformation("No results found for query");
+                        return new NotFoundResult();
+                    }
+
                     foreach (Object item in currentResultSet)
                     {
-                        // JObject jObject = JObject.FromObject(item);
-                        // string itemtype = jObject["type"].ToString();
-                        // string itemModel = "Media" + container + char.ToUpper(itemtype[0]) + itemtype.Substring(1);
-
-                        // object MediaItem;
-                        // switch (itemModel)
-                        // {
-                        //     case "MediaEmbeddedPerson":
-                        //         MediaItem = JsonConvert.DeserializeObject<MediaEmbeddedPerson>(jObject.ToString());
-                        //         break;
-                        //     case "MediaReferencePerson":
-                        //         MediaItem = JsonConvert.DeserializeObject<MediaReferencePerson>(jObject.ToString());
-                        //         break;
-                        //     case "MediaHybridPerson":
-                        //         MediaItem = JsonConvert.DeserializeObject<MediaHybridPerson>(jObject.ToString());
-                        //         break;
-                        //     default: // Default to single model for media as it can be used for all types in that container
-                        //         MediaItem = JsonConvert.DeserializeObject<MediaSingle>(jObject.ToString());
-                        //         break;
-                        // }
-
                         object Item = ResultModeling.GetItemModel(container, item);
                         QueryResult.MediaResults.Add(Item);
 
@@ -126,14 +103,7 @@ namespace Modules.Modeling
                     RequestDiagnostics.RequestCharge = currentResultSet.RequestCharge.ToString();
                     RequestDiagnostics.ActivityId = currentResultSet.ActivityId;
                 }
-
-                // TODO addd some kind of check for no results found
-                // if (QueryResult.MediaResults.Count == 0)
-                // {
-                //     return new NotFoundResult();
-                // }
-                // _logger.LogInformation("Query Result: {0}", JsonConvert.SerializeObject(QueryResult));
-                
+              
             }
 
             QueryResult.RequestDiagnostics = RequestDiagnostics;
