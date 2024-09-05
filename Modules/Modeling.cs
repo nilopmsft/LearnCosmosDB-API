@@ -11,13 +11,6 @@ using Newtonsoft.Json;
 namespace Modules.Modeling
 {
 
-    public class RequestValues
-    {
-        public string SearchValue { get; set; }
-        public string? SearchType { get; set; }
-        public string? DocId { get; set; }
-    }
-
     public class QueryCosmos(ILogger<QueryCosmos> logger, CosmosClient cosmosClient)
     {
         private readonly ILogger<QueryCosmos> _logger = logger;
@@ -25,7 +18,7 @@ namespace Modules.Modeling
         public string? SearchType { get; set; }
 
         [Function("QueryCosmos")]
-        public async Task<IActionResult> RunAsync([HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = "module/modeling/{container}")] HttpRequest req, string container)
+        public async Task<IActionResult> RunAsync([HttpTrigger(AuthorizationLevel.Function, "get", Route = "module/modeling/{container}")] HttpRequest req, string container)
         {
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             RequestValues RequestValues = System.Text.Json.JsonSerializer.Deserialize<RequestValues>(requestBody);
@@ -42,7 +35,8 @@ namespace Modules.Modeling
                 Container = container
             };
 
-            // If we have both Id and a SearchValue then we can attempt a Point Read.
+            // If we have both Id and a SearchValue then we can utilize a Point Read. Search Value assumes a passed in partition key value to match its documentId.
+            // You realistically wouldnt get here if you didnt know what the id and search value that match for a document.
             if (RequestValues.DocId != null && RequestValues.SearchValue != null)
             {
                 RequestDiagnostics.QueryType = "Point Read";
@@ -63,14 +57,17 @@ namespace Modules.Modeling
             }
             else
             {
+                // Query Type is a SQL Query, not point read
                 RequestDiagnostics.QueryType = "SQL Query";
-                // Check if this is a person query in single model as it has a unique query, otherwise standard title query
+
+                // If we have a type of person then we know its a 'single' model lookup since that is the only container documents that have embedded person's that are its not partitioned by
                 if (RequestValues.SearchType == "person")
                 {
                     RequestDiagnostics.QueryText = $"SELECT c.id, c.title, c.original_title, c.year, c.genres, c.actors, c.directors, c.type FROM c JOIN a IN c.actors JOIN d IN c.directors where a.name ='{RequestDiagnostics.FormattedSearchValue}' or d.name = '{RequestDiagnostics.FormattedSearchValue}'";
                 }
                 else
                 {
+                    //The container has documents that represent movies or people as their partition key
                     RequestDiagnostics.QueryText = $"SELECT * FROM c WHERE c.title = '{RequestDiagnostics.FormattedSearchValue}'";
                 }
 
@@ -78,8 +75,6 @@ namespace Modules.Modeling
 
                 FeedIterator<Object> queryResultSetIterator = cosmosContainer.GetItemQueryIterator<Object>(RequestDiagnostics.QueryText);
                 
-
-
                 while (queryResultSetIterator.HasMoreResults)
                 {
                     //Check for the document type and deserialize it into the appropriate class
@@ -91,17 +86,19 @@ namespace Modules.Modeling
                         _logger.LogInformation("No results found for query");
                         return new NotFoundResult();
                     }
-
-                    foreach (Object item in currentResultSet)
+                    else
                     {
-                        object Item = ResultModeling.GetItemModel(container, item);
-                        QueryResult.MediaResults.Add(Item);
+                        foreach (Object item in currentResultSet)
+                        {
+                            object Item = ResultModeling.GetItemModel(container, item);
+                            QueryResult.MediaResults.Add(Item);
 
+                        }
+
+                        // Set some of the diagnostic values for the query
+                        RequestDiagnostics.RequestCharge = currentResultSet.RequestCharge.ToString();
+                        RequestDiagnostics.ActivityId = currentResultSet.ActivityId;
                     }
-
-                    // Set some of the diagnostic values for the query
-                    RequestDiagnostics.RequestCharge = currentResultSet.RequestCharge.ToString();
-                    RequestDiagnostics.ActivityId = currentResultSet.ActivityId;
                 }
               
             }
@@ -113,6 +110,12 @@ namespace Modules.Modeling
         }
     }
 
+    public class RequestValues
+    {
+        public string SearchValue { get; set; }
+        public string? SearchType { get; set; }
+        public string? DocId { get; set; }
+    }
     public class MediaSingle
     {
         public string id { get; set; }
