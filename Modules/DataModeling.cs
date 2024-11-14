@@ -11,19 +11,19 @@ using Newtonsoft.Json;
 namespace Modules.Modeling
 {
 
-    public class QueryCosmos(ILogger<QueryCosmos> logger, CosmosClient cosmosClient)
+    public class DataModeling(ILogger<DataModeling> logger, CosmosClient cosmosClient)
     {
-        private readonly ILogger<QueryCosmos> _logger = logger;
+        private readonly ILogger<DataModeling> _logger = logger;
         private readonly CosmosClient _cosmosClient = cosmosClient;
         public string? SearchType { get; set; }
 
-        [Function("QueryCosmos")]
-        public async Task<IActionResult> RunAsync([HttpTrigger(AuthorizationLevel.Function, "get", Route = "module/modeling/{container}")] HttpRequest req, string container)
+        [Function("DataModeling")]
+        public async Task<IActionResult> RunAsync([HttpTrigger(AuthorizationLevel.Function, "get", Route = "module/DataModeling/{container}")] HttpRequest req, string container)
         {
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             RequestValues RequestValues = System.Text.Json.JsonSerializer.Deserialize<RequestValues>(requestBody);
 
-            Container cosmosContainer  = _cosmosClient.GetContainer(Environment.GetEnvironmentVariable("CosmosDbDatabaseName"), container);
+            Container cosmosContainer  = _cosmosClient.GetContainer("MediaModeling", container);
 
             QueryResult QueryResult = new QueryResult();
 
