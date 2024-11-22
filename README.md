@@ -16,31 +16,28 @@ All API requests will require a header value of 'x-functions-key' with the funct
 
 ### Data Modeling
 
-Utilizes a path of "/api/DataModeling/" for all related requests.
+**Endpoint** : `/api/DataModeling/` for all related requests
 
 **Parameters** to be provided are:
 
-- **dataModel** - Required = This represents which 'model' we are using for our search. Determines which container to query in our Cosmos Database. Options, 'Single','Embedded','Reference','Hybrid'
+- `dataModel` (required): This represents which 'model' we are using for our search. Determines which container to query in our Cosmos Database. Options, 'Single','Embedded','Reference','Hybrid'
 
-- **searchValue** - Required = actual search value passed by user/application. Both user input queries and point reads requires this value.
+- `searchValue` (required): Actual search value passed by user/application. Both user input queries and point reads requires this value.
 
-- **searchType** = type of search, 'movie', 'person' or 'point'. This due to the variety of models we have and is not always required. See respective request information.
+- `searchType` (optional): type of search, 'movie', 'person' or 'point'. This due to the variety of models we have and is not always required. See respective request information.
 
-- **docId** = Id of document if we have it available. Used for Point Reads.
+- `docId` (optional): Id of document if we have it available. Used for Point Reads.
 
 **Documents** will be two dictionaries of MediaResults and RequestDiagnostics. Review the below query and model chosen outputs to see respective structure.
 
-#### Movie Query
+**Movie Query**
 
-Query for retrieving movie(s) by search term. dataModel can be any but recommmended is 'Single' and UI will dictate which model (container) will be queried.
+Retrieve movies by search term. Regrdless of model, each movie has a single document for its individual movie which is retrieved by the searchValue if matching.
 
-- Parameters:
-
-    dataModel = 'Single'
-
-    searchValue = <'User input'>
-
-    searchType = 'movie'
+- **GET** `/api/DataModeling/`
+- **Parameters:**
+  - `dataModel`: `Single`
+  - `searchValue`: `<User input>`
 
 - Example Request:
 
@@ -108,20 +105,20 @@ Query for retrieving movie(s) by search term. dataModel can be any but recommmen
 }
 ```
 
-#### Person Query
+**Person Query**
 
 Query for finding documents by person name, be it director or actor. dataModel of Single requires the searchValue is 'person'  which dictates the backend query used. Making searchValue of 'person' critical here. All other dataModels ignore the 'person' search type and thus not required but for sanity should be included.
 
 
 - **Parameters**:
 
-    dataModel = <'Any Option'> *This is dictated by the UI as to which model we are demonstrating*
+    - `dataModel` : `<Any Model>` *This is dictated by the UI as to which model we are querying*
 
-    searchValue = <'User input'>
+    - `searchValue` : `<User input>`
 
-    searchType = 'person' *Required for Single model searches*
+    - `searchType` : `person` *Required for Single model searches*
 
-- **Example Single Model Person**
+- Example Single Model Person
 
 `GET <function_host>/api/DataModeling/?dataModel=Single&searchValue=<search Input>&searchType=person`
 
@@ -186,7 +183,7 @@ Query for finding documents by person name, be it director or actor. dataModel o
 }
 ```
 
-- **Example Embedded Model Person**
+- Example Embedded Model Person
 
 `GET <function_host>/api/DataModeling/?dataModel=Embedded&searchValue=<search Input>&searchType=person`
 
@@ -253,7 +250,7 @@ Query for finding documents by person name, be it director or actor. dataModel o
 }
 ```
 
-- **Example Reference Model Person**
+- Example Reference Model Person
 
 `GET <function_host>/api/DataModeling/?dataModel=Reference&searchValue=<search Input>&searchType=person`
 
@@ -295,7 +292,7 @@ Query for finding documents by person name, be it director or actor. dataModel o
 }
 ```
 
-- **Example Hybrid Model Person**
+- Example Hybrid Model Person
 
 `GET <function_host>/api/DataModeling/?dataModel=Hybrid&searchValue=<search Input>&searchType=person`
 
@@ -337,6 +334,21 @@ Query for finding documents by person name, be it director or actor. dataModel o
   }
 }
 ```
+
+**Point Read**
+
+Scenarios where we have both the partition value (title) and the document ID (id), actions that are retrieving a document, e.g. clicking on a movie for its details, allows us to utilize a point read, the most effective way of retrieving individual documents.
+
+- **GET**  `/api/DataModeling/`
+- **Parameters:**
+  - `searchValue`: `<User input>`
+  - `docId`: `<Document ID>`
+
+- Example Movie Point Read
+
+`GET <function_host>/api/DataModeling/?searchValue=<search Input>&docId=<docId>`
+
+Results would be the same as returning a single movie, primary difference being the query cost being fundamentally cheaper and results limited to the single document requested (i.e. a movie with multiple of the same name would be multiple documents which is not a point read, that would be retrieving a specific version of that movie title)
 
 ## Utilities
 
